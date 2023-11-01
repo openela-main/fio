@@ -1,0 +1,51 @@
+From 2459bd33b3dbb7a34f28c612d595311a6bc7593d Mon Sep 17 00:00:00 2001
+From: Vincent Fu <vincent.fu@samsung.com>
+Date: Wed, 4 Aug 2021 18:29:05 +0000
+Subject: [PATCH] ioengines: fix crash with --enghelp option
+
+Since f6931a1dd35896433c8cc2e10de51372a2c496c4 commands like the
+following segfault:
+
+fio --enghelp=sg
+fio --enghelp=sg,sg_write_mode
+
+This is because free_ioengine() assumes that td->io_ops is not NULL.
+Make this true when free_ioengine() is called by
+fio_show_ioengine_help() to avoid the crash.
+
+Signed-off-by: Vincent Fu <vincent.fu@samsung.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ ioengines.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/ioengines.c b/ioengines.c
+index dd61af07..d08a511a 100644
+--- a/ioengines.c
++++ b/ioengines.c
+@@ -692,17 +692,17 @@ int fio_show_ioengine_help(const char *engine)
+ 	}
+ 
+ 	td.o.ioengine = (char *)engine;
+-	io_ops = load_ioengine(&td);
++	td.io_ops = load_ioengine(&td);
+ 
+-	if (!io_ops) {
++	if (!td.io_ops) {
+ 		log_info("IO engine %s not found\n", engine);
+ 		return 1;
+ 	}
+ 
+-	if (io_ops->options)
+-		ret = show_cmd_help(io_ops->options, sep);
++	if (td.io_ops->options)
++		ret = show_cmd_help(td.io_ops->options, sep);
+ 	else
+-		log_info("IO engine %s has no options\n", io_ops->name);
++		log_info("IO engine %s has no options\n", td.io_ops->name);
+ 
+ 	free_ioengine(&td);
+ 	return ret;
+-- 
+2.17.0
+

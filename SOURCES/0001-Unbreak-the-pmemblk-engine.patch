@@ -1,0 +1,37 @@
+From 8644ef7c4c49aa6d6492b3b250a06b841496d7fd Mon Sep 17 00:00:00 2001
+From: Bart Van Assche <bvanassche@acm.org>
+Date: Sat, 27 Jun 2020 07:26:24 -0700
+Subject: [PATCH] Unbreak the pmemblk engine
+
+Reported-by: Yi Zhang <yi.zhang@redhat.com>
+Tested-by: Yi Zhang <yi.zhang@redhat.com>
+Fixes: e9c7be0e32e6 ("pmemblk: Fix a memory leak")
+Signed-off-by: Bart Van Assche <bvanassche@acm.org>
+---
+ engines/pmemblk.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/engines/pmemblk.c b/engines/pmemblk.c
+index 730f4d7..e2eaa15 100644
+--- a/engines/pmemblk.c
++++ b/engines/pmemblk.c
+@@ -220,14 +220,14 @@ static fio_pmemblk_file_t pmb_open(const char *pathspec, int flags)
+ 		pmb->pmb_nblocks = pmemblk_nblock(pmb->pmb_pool);
+ 
+ 		fio_pmemblk_cache_insert(pmb);
++	} else {
++		free(path);
+ 	}
+ 
+ 	pmb->pmb_refcnt += 1;
+ 
+ 	pthread_mutex_unlock(&CacheLock);
+ 
+-	free(path);
+-
+ 	return pmb;
+ 
+ error:
+-- 
+2.9.5
+

@@ -1,0 +1,30 @@
+From 2b3d4a6a924e0aa82654d3b96fb134085af7a98a Mon Sep 17 00:00:00 2001
+From: Eric Sandeen <esandeen@redhat.com>
+Date: Wed, 26 Jan 2022 08:49:45 -0600
+Subject: [PATCH] fio: use LDFLAGS when linking dynamic engines
+
+Without this, locally defined LDFLAGS won't be applied when
+linking the dynamically loaded IO engines.
+
+Signed-off-by: Eric Sandeen <sandeen@redhat.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 76eb0d7d..00e79539 100644
+--- a/Makefile
++++ b/Makefile
+@@ -295,7 +295,7 @@ define engine_template =
+ $(1)_OBJS := $$($(1)_SRCS:.c=.o)
+ $$($(1)_OBJS): CFLAGS := -fPIC $$($(1)_CFLAGS) $(CFLAGS)
+ engines/fio-$(1).so: $$($(1)_OBJS)
+-	$$(QUIET_LINK)$(CC) -shared -rdynamic -fPIC -Wl,-soname,fio-$(1).so.1 -o $$@ $$< $$($(1)_LIBS)
++	$$(QUIET_LINK)$(CC) $(LDFLAGS) -shared -rdynamic -fPIC -Wl,-soname,fio-$(1).so.1 -o $$@ $$< $$($(1)_LIBS)
+ ENGS_OBJS += engines/fio-$(1).so
+ endef
+ else # !CONFIG_DYNAMIC_ENGINES
+-- 
+2.31.1
+

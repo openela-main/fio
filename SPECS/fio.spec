@@ -1,18 +1,19 @@
 Name:		fio
-Version:	3.27
-Release:	8%{?dist}
+Version:	3.35
+Release:	1%{?dist}
 Summary:	Multithreaded IO generation tool
 
 License:	GPLv2
 URL:		http://git.kernel.dk/?p=fio.git;a=summary
-Source:		http://brick.kernel.dk/snaps/%{name}-%{version}.tar.bz2
+Source0:	http://brick.kernel.dk/snaps/%{name}-%{version}.tar.bz2
+Source1:	https://brick.kernel.dk/snaps/%{name}-%{version}.tar.bz2.asc
+Source2:	https://git.kernel.org/pub/scm/docs/kernel/pgpkeys.git/plain/keys/F7D358FB2971E0A6.asc
+Source3:	pmemblk.png
 
-Patch0:		0001-ioengines-fix-crash-with-enghelp-option.patch
-Patch1:		0001-fio-remove-raw-device-support.patch
-Patch2:		0001-fio-use-LDFLAGS-when-linking-dynamic-engines.patch
-Patch3:		0001-fio-os-detect-pmull-suooprt-on-arm.patch
+Patch0:		0001-Revert-pmemblk-remove-pmemblk-engine.patch
 
 BuildRequires:	gcc
+BuildRequires:  gnupg2
 BuildRequires:	libaio-devel
 BuildRequires:	zlib-devel
 BuildRequires:	python3-devel
@@ -145,7 +146,9 @@ RDMA engine for %{name}.
 %endif
 
 %prep
+%{gpgverify} --keyring='%{SOURCE2}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
 %autosetup -p1
+
 
 pathfix.py -i %{__python3} -pn \
  tools/fio_jsonplus_clat2csv \
@@ -163,9 +166,11 @@ EXTFLAGS="$RPM_OPT_FLAGS" LDFLAGS="$RPM_LD_FLAGS" make V=1 %{?_smp_mflags}
 
 %install
 make install prefix=%{_prefix} mandir=%{_mandir} libdir=%{_libdir}/fio DESTDIR=$RPM_BUILD_ROOT INSTALL="install -p"
+mkdir -p  %{buildroot}/%{_docdir}/%{name}/examples/
+install -p -m 0644 %{SOURCE3} %{buildroot}/%{_docdir}/%{name}/examples
 
 %files
-%doc README REPORTING-BUGS HOWTO examples
+%doc README.rst REPORTING-BUGS HOWTO.rst examples
 %doc MORAL-LICENSE GFIO-TODO SERVER-TODO STEADYSTATE-TODO
 %license COPYING
 %dir %{_datadir}/%{name}
@@ -212,6 +217,12 @@ make install prefix=%{_prefix} mandir=%{_mandir} libdir=%{_libdir}/fio DESTDIR=$
 %endif
 
 %changelog
+* Sat May 27 2023 Pavel Reichl <preichl@redhat.com> - 3.35-1
+- Rebase to new upstream release
+- Do NOT drop support for pmemblk https://github.com/axboe/fio/commit/04c1cdc
+- Add signature check
+- Related: rhbz#2188805
+
 * Mon Oct 24 2022 Pavel Reichl <preichl@redhat.com> - 3.27-8
 - Fix fio failure with --verify=crc32c on arm
   Related: rhbz#1974189

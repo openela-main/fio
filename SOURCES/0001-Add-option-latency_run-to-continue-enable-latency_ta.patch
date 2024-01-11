@@ -1,0 +1,187 @@
+From e1bcd541f63f9029f6c50116831303ad06292edc Mon Sep 17 00:00:00 2001
+From: Song Liu <songliubraving@fb.com>
+Date: Sun, 17 May 2020 22:39:49 -0700
+Subject: [PATCH] Add option latency_run to continue enable latency_target
+
+Currently, latency_target run will exist once fio find the highest queue
+depth that meets latency_target. Add option latency_run. If set, fio will
+continue running and try to meet latency_target by adusting queue depth.
+
+Signed-off-by: Song Liu <songliubraving@fb.com>
+---
+ HOWTO            |  7 +++++++
+ cconv.c          |  2 ++
+ fio.1            |  5 +++++
+ fio.h            |  1 +
+ io_u.c           | 18 +++++++++++++++++-
+ options.c        | 10 ++++++++++
+ server.h         |  2 +-
+ thread_options.h |  2 ++
+ 8 files changed, 45 insertions(+), 2 deletions(-)
+
+diff --git a/HOWTO b/HOWTO
+index 430c7b62..f0b4ffe4 100644
+--- a/HOWTO
++++ b/HOWTO
+@@ -2551,6 +2551,13 @@ I/O latency
+ 	defaults to 100.0, meaning that all I/Os must be equal or below to the value
+ 	set by :option:`latency_target`.
+ 
++.. option:: latency_run=bool
++
++	Used with :option:`latency_target`. If false (default), fio will find
++	the highest queue depth that meets :option:`latency_target` and exit. If
++	true, fio will continue running and try to meet :option:`latency_target`
++	by adjusting queue depth.
++
+ .. option:: max_latency=time
+ 
+ 	If set, fio will exit the job with an ETIMEDOUT error if it exceeds this
+diff --git a/cconv.c b/cconv.c
+index 48218dc4..449bcf7b 100644
+--- a/cconv.c
++++ b/cconv.c
+@@ -288,6 +288,7 @@ void convert_thread_options_to_cpu(struct thread_options *o,
+ 	o->latency_window = le64_to_cpu(top->latency_window);
+ 	o->max_latency = le64_to_cpu(top->max_latency);
+ 	o->latency_percentile.u.f = fio_uint64_to_double(le64_to_cpu(top->latency_percentile.u.i));
++	o->latency_run = le32_to_cpu(top->latency_run);
+ 	o->compress_percentage = le32_to_cpu(top->compress_percentage);
+ 	o->compress_chunk = le32_to_cpu(top->compress_chunk);
+ 	o->dedupe_percentage = le32_to_cpu(top->dedupe_percentage);
+@@ -487,6 +488,7 @@ void convert_thread_options_to_net(struct thread_options_pack *top,
+ 	top->latency_window = __cpu_to_le64(o->latency_window);
+ 	top->max_latency = __cpu_to_le64(o->max_latency);
+ 	top->latency_percentile.u.i = __cpu_to_le64(fio_double_to_uint64(o->latency_percentile.u.f));
++	top->latency_run = __cpu_to_le32(o->latency_run);
+ 	top->compress_percentage = cpu_to_le32(o->compress_percentage);
+ 	top->compress_chunk = cpu_to_le32(o->compress_chunk);
+ 	top->dedupe_percentage = cpu_to_le32(o->dedupe_percentage);
+diff --git a/fio.1 b/fio.1
+index a2379f98..3a7a359b 100644
+--- a/fio.1
++++ b/fio.1
+@@ -2275,6 +2275,11 @@ The percentage of I/Os that must fall within the criteria specified by
+ defaults to 100.0, meaning that all I/Os must be equal or below to the value
+ set by \fBlatency_target\fR.
+ .TP
++.BI latency_run \fR=\fPbool
++Used with \fBlatency_target\fR. If false (default), fio will find the highest
++queue depth that meets \fBlatency_target\fR and exit. If true, fio will continue
++running and try to meet \fBlatency_target\fR by adjusting queue depth.
++.TP
+ .BI max_latency \fR=\fPtime
+ If set, fio will exit the job with an ETIMEDOUT error if it exceeds this
+ maximum latency. When the unit is omitted, the value is interpreted in
+diff --git a/fio.h b/fio.h
+index bbf057c1..7610026d 100644
+--- a/fio.h
++++ b/fio.h
+@@ -377,6 +377,7 @@ struct thread_data {
+ 	unsigned int latency_qd_high;
+ 	unsigned int latency_qd_low;
+ 	unsigned int latency_failed;
++	unsigned int latency_stable_count;
+ 	uint64_t latency_ios;
+ 	int latency_end_run;
+ 
+diff --git a/io_u.c b/io_u.c
+index aa8808b8..ae1438fd 100644
+--- a/io_u.c
++++ b/io_u.c
+@@ -1391,6 +1391,7 @@ static bool __lat_target_failed(struct thread_data *td)
+ 		td->latency_qd_low--;
+ 
+ 	td->latency_qd = (td->latency_qd + td->latency_qd_low) / 2;
++	td->latency_stable_count = 0;
+ 
+ 	dprint(FD_RATE, "Ramped down: %d %d %d\n", td->latency_qd_low, td->latency_qd, td->latency_qd_high);
+ 
+@@ -1440,6 +1441,21 @@ static void lat_target_success(struct thread_data *td)
+ 
+ 	td->latency_qd_low = td->latency_qd;
+ 
++	if (td->latency_qd + 1 == td->latency_qd_high) {
++		/*
++		 * latency_qd will not incease on lat_target_success(), so
++		 * called stable. If we stick with this queue depth, the
++		 * final latency is likely lower than latency_target. Fix
++		 * this by increasing latency_qd_high slowly. Use a naive
++		 * heuristic here. If we get lat_target_success() 3 times
++		 * in a row, increase latency_qd_high by 1.
++		 */
++		if (++td->latency_stable_count >= 3) {
++			td->latency_qd_high++;
++			td->latency_stable_count = 0;
++		}
++	}
++
+ 	/*
+ 	 * If we haven't failed yet, we double up to a failing value instead
+ 	 * of bisecting from highest possible queue depth. If we have set
+@@ -1459,7 +1475,7 @@ static void lat_target_success(struct thread_data *td)
+ 	 * Same as last one, we are done. Let it run a latency cycle, so
+ 	 * we get only the results from the targeted depth.
+ 	 */
+-	if (td->latency_qd == qd) {
++	if (!o->latency_run && td->latency_qd == qd) {
+ 		if (td->latency_end_run) {
+ 			dprint(FD_RATE, "We are done\n");
+ 			td->done = 1;
+diff --git a/options.c b/options.c
+index b18cea33..da401aed 100644
+--- a/options.c
++++ b/options.c
+@@ -3672,6 +3672,16 @@ struct fio_option fio_options[FIO_MAX_OPTS] = {
+ 		.category = FIO_OPT_C_IO,
+ 		.group	= FIO_OPT_G_LATPROF,
+ 	},
++	{
++		.name	= "latency_run",
++		.lname	= "Latency Run",
++		.type	= FIO_OPT_BOOL,
++		.off1	= offsetof(struct thread_options, latency_run),
++		.help	= "Keep adjusting queue depth to match latency_target",
++		.def	= "0",
++		.category = FIO_OPT_C_IO,
++		.group	= FIO_OPT_G_LATPROF,
++	},
+ 	{
+ 		.name	= "invalidate",
+ 		.lname	= "Cache invalidate",
+diff --git a/server.h b/server.h
+index 279b6917..de01a5c8 100644
+--- a/server.h
++++ b/server.h
+@@ -48,7 +48,7 @@ struct fio_net_cmd_reply {
+ };
+ 
+ enum {
+-	FIO_SERVER_VER			= 82,
++	FIO_SERVER_VER			= 83,
+ 
+ 	FIO_SERVER_MAX_FRAGMENT_PDU	= 1024,
+ 	FIO_SERVER_MAX_CMD_MB		= 2048,
+diff --git a/thread_options.h b/thread_options.h
+index c78ed43d..09ccd5b2 100644
+--- a/thread_options.h
++++ b/thread_options.h
+@@ -324,6 +324,7 @@ struct thread_options {
+ 	unsigned long long latency_target;
+ 	unsigned long long latency_window;
+ 	fio_fp64_t latency_percentile;
++	uint32_t latency_run;
+ 
+ 	unsigned int sig_figs;
+ 
+@@ -612,6 +613,7 @@ struct thread_options_pack {
+ 	uint64_t latency_window;
+ 	uint64_t max_latency;
+ 	fio_fp64_t latency_percentile;
++	uint32_t latency_run;
+ 
+ 	uint32_t sig_figs;
+ 
+-- 
+2.17.0
+

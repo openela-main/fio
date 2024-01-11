@@ -1,0 +1,28 @@
+From 2e3fb343ec883674a4927f2da983759bf90a0671 Mon Sep 17 00:00:00 2001
+From: Song Liu <songliubraving@fb.com>
+Date: Sun, 17 May 2020 22:46:21 -0700
+Subject: [PATCH] init: fix unit of latency_window
+
+latency_window has unit of microseconds, and is compared against
+usec_window. Therefore, there is no need to fix it up to nanoseconds.
+
+Signed-off-by: Song Liu <songliubraving@fb.com>
+---
+ init.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/init.c b/init.c
+index b5315334..0431f700 100644
+--- a/init.c
++++ b/init.c
+@@ -956,7 +956,6 @@ static int fixup_options(struct thread_data *td)
+ 	 */
+ 	o->max_latency *= 1000ULL;
+ 	o->latency_target *= 1000ULL;
+-	o->latency_window *= 1000ULL;
+ 
+ 	return ret;
+ }
+-- 
+2.17.0
+
